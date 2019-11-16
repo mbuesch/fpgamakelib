@@ -71,7 +71,7 @@ endif
 	$(PYTHON) -B $<
 
 # Synthesis
-%.blif: $(TOP_FILE) $(wildcard *.v) $(GENERATED_V) $(PLL_MOD_V_FILE)
+%.blif: $(TOP_FILE) $(wildcard *.v) $(wildcard *.py) $(GENERATED_V) $(PLL_MOD_V_FILE)
 	$(YOSYS) -p 'read_verilog -DTARGET_$(TARGET_UPPER)=1 -DCLK_HZ=$(CLK_HZ) -DPLL_HZ=$(PLL_HZ) $(if $(filter-out 0,$(DEBUG)),-DDEBUG=1) $<' \
 		-p $(YOSYS_SYNTH_CMD) \
 		$(call LOG,$(YOSYS_LOG))
