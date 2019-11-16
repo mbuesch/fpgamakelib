@@ -18,6 +18,10 @@ PCF_FILE	:= $(TARGET).pcf
 PLL_MOD_V_FILE	:= pll_mod.v
 GENERATED_V	:=
 
+# Extra dependencies
+EXTRA_DEP_V	:=
+EXTRA_DEP_PY	:=
+
 # Additional cleanup
 CLEAN_FILES	:=
 
