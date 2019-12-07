@@ -1,64 +1,87 @@
 #!/bin/sh
 #
 # FPGA toolchain install script.
-# v1.0
+# v1.1
 # This script installs a full Open Source FPGA toolchain to a user directory.
 #
-# - Script usage -
-#
-# Install toolchain to $HOME/fpga-toolchain
-#   ./build_fpga_toolchain.sh
-#
-# Install toolchain to another destination
-#   ./build_fpga_toolchain.sh /home/user/directory
-#
-# The script will create a temporary directory during build to build all tools:
-#   ./fpga-toolchain-build-tmp
-#
-# The following tools are needed to build the toolchain:
-# - gcc
-# - clang
-# - python3
-# - cmake
-# - git
-#
-# Please ensure that all these tools are installed in the system.
+# Copyright 2019 Michael Buesch <m@bues.ch>
 #
 
-
-# ============================================================================
-# ============================================================================
-# ============================================================================
-
-# The toolchain will be installed into this directory:
-if [ -n "$1" ]; then
-	INSTALLDIR="$1"
-else
-	INSTALLDIR="$HOME/fpga-toolchain"
-fi
-
-# The following directory will be used as temporary build directory:
-BUILDDIR="./fpga-toolchain-build-tmp"
-
-# Run at most this many build processes in parallel:
-PARALLEL="$(getconf _NPROCESSORS_ONLN)"
-
-# Source repositories:
-REPO_ICESTORM="https://github.com/cliffordwolf/icestorm.git"
-REPO_NEXTPNR="https://github.com/YosysHQ/nextpnr.git"
-REPO_YOSYS="https://github.com/YosysHQ/yosys.git"
-REPO_TINYPROG="https://github.com/tinyfpga/TinyFPGA-Bootloader.git"
-
-# Tools to build:
-BUILD_ICESTORM=1
-BUILD_NEXTPNR=1
-BUILD_YOSYS=1
-BUILD_TINYPROG=1
 
 die()
 {
 	echo "$*" >&2
 	exit 1
+}
+
+show_help()
+{
+	echo "Usage: build_fpga_toolchain.sh <OPTIONS> [INSTALLDIR]"
+	echo
+	echo "Options:"
+	echo " -j|--jobs NR                  Set the number of build jobs to run in parallel."
+	echo "                               Default: Number of CPUs"
+	echo " -h|--help                     Print help."
+	echo
+	echo
+	echo "Install toolchain to $HOME/fpga-toolchain"
+	echo "  ./build_fpga_toolchain.sh"
+	echo
+	echo "Install toolchain to another destination"
+	echo "  ./build_fpga_toolchain.sh /home/user/directory"
+	echo
+	echo "The script will create a temporary directory during build to build all tools:"
+	echo "  ./fpga-toolchain-build-tmp"
+	echo
+	echo "The following tools are needed to build the toolchain:"
+	echo "- gcc"
+	echo "- clang"
+	echo "- python3"
+	echo "- cmake"
+	echo "- git"
+	echo "Please ensure that all of these tools are installed in the system."
+}
+
+parse_args()
+{
+	# Defaults:
+	PARALLEL="$(getconf _NPROCESSORS_ONLN)"
+	BUILDDIR="./fpga-toolchain-build-tmp"
+	INSTALLDIR="$HOME/fpga-toolchain"
+
+	# Source repositories:
+	REPO_ICESTORM="https://github.com/cliffordwolf/icestorm.git"
+	REPO_NEXTPNR="https://github.com/YosysHQ/nextpnr.git"
+	REPO_YOSYS="https://github.com/YosysHQ/yosys.git"
+	REPO_TINYPROG="https://github.com/tinyfpga/TinyFPGA-Bootloader.git"
+
+	# Parse command line options
+	while [ $# -ge 1 ]; do
+		[ "$(printf '%s' "$1" | cut -c1)" != "-" ] && break
+
+		case "$1" in
+		-h|--help)
+			show_help
+			exit 0
+			;;
+		-j|--jobs)
+			shift
+			PARALLEL="$1"
+			[ -z "$PARALLEL" -o -n "$(printf '%s' "$PARALLEL" | tr -d '[0-9]')" ] &&\
+				die "--jobs: '$PARALLEL' is not a positive integer number."
+			;;
+		*)
+			echo "Unknown option: $1"
+			exit 1
+			;;
+		esac
+		shift
+	done
+
+	if [ $# -ge 1 -a -n "$1" ]; then
+		# User defined INSTALLDIR
+		INSTALLDIR="$1"
+	fi
 }
 
 checkprog()
@@ -68,33 +91,43 @@ checkprog()
 		die "$prog is not installed. Please install it by use of the distribution package manager (apt, apt-get, rpm, etc...)"
 }
 
-# Check host tools.
-[ "$(id -u)" = "0" ] && die "Do not run this as root!"
-checkprog gcc
-checkprog clang
-checkprog python3
-checkprog cmake
-checkprog git
+check_build_environment()
+{
+	[ "$(id -u)" = "0" ] && die "Do not run this as root!"
+	checkprog gcc
+	checkprog clang
+	checkprog python3
+	checkprog cmake
+	checkprog git
+}
 
-# Resolve paths.
-BUILDDIR="$(realpath -m -s "$BUILDDIR")"
-INSTALLDIR="$(realpath -m -s "$INSTALLDIR")"
-echo "BUILDDIR=$BUILDDIR"
-echo "INSTALLDIR=$INSTALLDIR"
-echo "PARALLEL=$PARALLEL"
-[ -n "$BUILDDIR" -a -n "$INSTALLDIR" ] || die "Failed to resolve directories"
-echo
+cleanup()
+{
+	rm -rf "$BUILDDIR" || die "Failed to cleanup BUILDDIR"
+}
 
-# Cleanup
-rm -rf "$BUILDDIR" || die "Failed to cleanup BUILDDIR"
-mkdir -p "$BUILDDIR" || die "Failed to create BUILDDIR"
-mkdir -p "$INSTALLDIR" || die "Failed to create INSTALLDIR"
+prepare()
+{
+	# Resolve paths.
+	BUILDDIR="$(realpath -m -s "$BUILDDIR")"
+	INSTALLDIR="$(realpath -m -s "$INSTALLDIR")"
+	echo "BUILDDIR=$BUILDDIR"
+	echo "INSTALLDIR=$INSTALLDIR"
+	echo "PARALLEL=$PARALLEL"
+	[ -n "$BUILDDIR" -a -n "$INSTALLDIR" ] || die "Failed to resolve directories"
+	echo
 
-newpath="\$PATH"
+	# Create the build directories.
+	cleanup
+	mkdir -p "$BUILDDIR" || die "Failed to create BUILDDIR"
+	mkdir -p "$INSTALLDIR" || die "Failed to create INSTALLDIR"
 
+	# Reset the new PATH.
+	NEWPATH="\$PATH"
+}
 
-# Project Icestorm
-if [ $BUILD_ICESTORM -ne 0 ]; then
+build_icestorm()
+{
 	echo "Building icestorm..."
 	cd "$BUILDDIR" || die "Failed to cd to builddir."
 	git clone "$REPO_ICESTORM" "$BUILDDIR/icestorm" || die "Failed to clone icestorm"
@@ -103,12 +136,12 @@ if [ $BUILD_ICESTORM -ne 0 ]; then
 	make -j "$PARALLEL" PREFIX="$PREFIX" || die "Failed to build icestorm"
 	rm -rf "$PREFIX" || die "Failed to clean install icestorm"
 	make install PREFIX="$PREFIX" || die "Failed to install icestorm"
-	newpath="$PREFIX/bin:$newpath"
-fi
 
+	NEWPATH="$PREFIX/bin:$NEWPATH"
+}
 
-# nextpnr
-if [ $BUILD_NEXTPNR -ne 0 ]; then
+build_nextpnr()
+{
 	echo "Building nextpnr..."
 	cd "$BUILDDIR" || die "Failed to cd to builddir."
 	git clone "$REPO_NEXTPNR" "$BUILDDIR/nextpnr" || die "Failed to clone nextpnr"
@@ -119,12 +152,12 @@ if [ $BUILD_NEXTPNR -ne 0 ]; then
 	make -j "$PARALLEL" || die "Failed to build nextpnr"
 	rm -rf "$PREFIX" || die "Failed to clean install nextpnr"
 	make install || die "Failed to install nextpnr"
-	newpath="$PREFIX/bin:$newpath"
-fi
 
+	NEWPATH="$PREFIX/bin:$NEWPATH"
+}
 
-# yosys
-if [ $BUILD_YOSYS -ne 0 ]; then
+build_yosys()
+{
 	echo "Building yosys..."
 	cd "$BUILDDIR" || die "Failed to cd to builddir."
 	git clone "$REPO_YOSYS" "$BUILDDIR/yosys" || die "Failed to clone yosys"
@@ -134,12 +167,12 @@ if [ $BUILD_YOSYS -ne 0 ]; then
 	make -j "$PARALLEL" PREFIX="$PREFIX" || die "Failed to build yosys"
 	rm -rf "$PREFIX" || die "Failed to clean install yosys"
 	make install PREFIX="$PREFIX" || die "Failed to install yosys"
-	newpath="$PREFIX/bin:$newpath"
-fi
 
+	NEWPATH="$PREFIX/bin:$NEWPATH"
+}
 
-# tinyprog
-if [ $BUILD_TINYPROG -ne 0 ]; then
+build_tinyprog()
+{
 	echo "Building tinyprog..."
 	cd "$BUILDDIR" || die "Failed to cd to builddir."
 	git clone "$REPO_TINYPROG" "$BUILDDIR/TinyFPGA-Bootloader" || die "Failed to clone tinyprog"
@@ -156,11 +189,19 @@ exec python3 "$PREFIX/lib/tinyprog" "\$@"
 EOF
 	[ -f "$PREFIX/bin/tinyprog" ] || die "Failed to install tinyprog wrapper"
 	chmod 755 "$PREFIX/bin/tinyprog" || die "Failed to chmod tinyprog"
-	newpath="$PREFIX/bin:$newpath"
-fi
 
-# Cleanup
-rm -rf "$BUILDDIR" || die "Failed to cleanup BUILDDIR"
+	NEWPATH="$PREFIX/bin:$NEWPATH"
+}
+
+
+parse_args "$@"
+check_build_environment
+prepare
+build_icestorm
+build_nextpnr
+build_yosys
+build_tinyprog
+cleanup
 
 echo
 echo
@@ -168,5 +209,5 @@ echo
 echo "Successfully built and installed all FPGA tools to: $INSTALLDIR"
 echo "Please add the following line to your $HOME/.bashrc file:"
 echo
-echo "export PATH=\"$newpath\""
+echo "export PATH=\"$NEWPATH\""
 echo
