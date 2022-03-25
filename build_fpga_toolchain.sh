@@ -50,6 +50,7 @@ show_help()
 	echo "- python3"
 	echo "- cmake"
 	echo "- git"
+	echo "- schedtool"
 	echo "Please ensure that all of these tools are installed in the system."
 }
 
@@ -110,6 +111,7 @@ check_build_environment()
 	checkprog python3
 	checkprog cmake
 	checkprog git
+	checkprog schedtool
 }
 
 cleanup()
@@ -127,6 +129,9 @@ prepare()
 	echo "PARALLEL=$PARALLEL"
 	[ -n "$BUILDDIR" -a -n "$INSTALLDIR" ] || die "Failed to resolve directories"
 	echo
+
+	# Set priority
+	schedtool -D -n19 $$ || die "Failed to reduce process priority"
 
 	# Create the build directories.
 	cleanup
